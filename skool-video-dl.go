@@ -317,6 +317,14 @@ func scrapeModulesForCourse(ctx context.Context, courseURL string, cfg Config) (
 // -----------------------------------------------------------------------------
 func handleModule(ctx context.Context, m ModuleInfo, courseDir string, cfg Config) (ModuleData, error) {
 	modDir := filepath.Join(courseDir, m.Title)
+	modFile := filepath.Join(modDir, "module.html")
+
+	// Skip module if HTML already exists
+	if _, err := os.Stat(modFile); err == nil {
+		fmt.Println("    already downloaded, skipping")
+		return ModuleData{Title: m.Title, URL: m.URL}, nil
+	}
+
 	must(os.MkdirAll(modDir, fs.ModePerm))
 
 	if err := chromedp.Run(ctx,
@@ -401,7 +409,6 @@ func handleModule(ctx context.Context, m ModuleInfo, courseDir string, cfg Confi
 		}
 	}
 
-	modFile := filepath.Join(modDir, "module.html")
 	if err := buildModuleHTML(modFile, m.Title, descBullet, recs); err != nil {
 		log.Printf("Cannot write module.html for %s: %v\n", m.Title, err)
 	}
@@ -763,6 +770,12 @@ func buildModuleHTML(path string, title, desc string, videos []VideoRecord) erro
 // downloadVideo => yt-dlp
 // -----------------------------------------------------------------------------
 func downloadVideo(url string, outDir string, idx int) (string, error) {
+	final := filepath.Join(outDir, fmt.Sprintf("video-%02d.mp4", idx))
+	if _, err := os.Stat(final); err == nil {
+		fmt.Printf("      skipping existing file %s\n", filepath.Base(final))
+		return final, nil
+	}
+
 	name := fmt.Sprintf("video-%02d.%%(ext)s", idx)
 	outputTemplate := filepath.Join(outDir, name)
 
@@ -772,7 +785,6 @@ func downloadVideo(url string, outDir string, idx int) (string, error) {
 	if err := cmd.Run(); err != nil {
 		return "", err
 	}
-	final := filepath.Join(outDir, fmt.Sprintf("video-%02d.mp4", idx))
 	return final, nil
 }
 
