@@ -8,6 +8,7 @@ import (
 	"html"
 	"io/fs"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -441,16 +442,42 @@ func extractAllVideoLinksFromAny(val interface{}) []string {
 func allVimeoUrls(link string) []string {
 	id := ""
 	hash := ""
-	re := regexp.MustCompile(`vimeo\.com/(?:video/)?(\d+)(?:/([a-zA-Z0-9]+))?`)
-	m := re.FindStringSubmatch(link)
-	if len(m) > 1 {
-		id = m[1]
-	}
-	if len(m) > 2 {
-		hash = m[2]
+
+	if u, err := url.Parse(link); err == nil {
+		segs := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(segs) > 0 {
+			if segs[0] == "video" {
+				if len(segs) > 1 {
+					id = segs[1]
+				}
+				if len(segs) > 2 {
+					hash = segs[2]
+				}
+			} else {
+				id = segs[0]
+				if len(segs) > 1 {
+					hash = segs[1]
+				}
+			}
+		}
+		if h := u.Query().Get("h"); h != "" {
+			hash = h
+		}
+	} else {
+		re := regexp.MustCompile(`vimeo\.com/(?:video/)?(\d+)(?:/([a-zA-Z0-9]+))?`)
+		m := re.FindStringSubmatch(link)
+		if len(m) > 1 {
+			id = m[1]
+		}
+		if len(m) > 2 {
+			hash = m[2]
+		}
 	}
 	var urls []string
 	if id != "" {
+		if hash != "" {
+			urls = append(urls, fmt.Sprintf("https://player.vimeo.com/video/%s?h=%s", id, hash))
+		}
 		urls = append(urls, fmt.Sprintf("https://player.vimeo.com/video/%s", id))
 		if hash != "" {
 			urls = append(urls, fmt.Sprintf("https://vimeo.com/%s/%s", id, hash))
@@ -620,14 +647,53 @@ func filterLoomVimeo(links []string) []string {
 // -----------------------------------------------------------------------------
 // rewriteVimeoToPlayer => vimeo.com/\d+ => player
 // -----------------------------------------------------------------------------
-var reVimeoNum = regexp.MustCompile(`(?i)vimeo\.com/(\d+)`)
+var reVimeoNum = regexp.MustCompile(`(?i)vimeo\.com/(?:video/)?(\d+)`)
 
 func rewriteVimeoToPlayer(link string) string {
-	m := reVimeoNum.FindStringSubmatch(link)
-	if len(m) > 1 {
-		return "https://player.vimeo.com/video/" + m[1]
+	if strings.Contains(link, "player.vimeo.com") {
+		return link
 	}
-	return link
+
+	u, err := url.Parse(link)
+	if err != nil {
+		return link
+	}
+
+	segs := strings.Split(strings.Trim(u.Path, "/"), "/")
+	id := ""
+	hash := u.Query().Get("h")
+
+	if len(segs) > 0 {
+		if segs[0] == "video" {
+			if len(segs) > 1 {
+				id = segs[1]
+			}
+			if len(segs) > 2 {
+				hash = segs[2]
+			}
+		} else {
+			id = segs[0]
+			if len(segs) > 1 {
+				hash = segs[1]
+			}
+		}
+	}
+
+	if id == "" {
+		m := reVimeoNum.FindStringSubmatch(link)
+		if len(m) > 1 {
+			id = m[1]
+		}
+	}
+
+	if id == "" {
+		return link
+	}
+
+	if hash != "" {
+		return fmt.Sprintf("https://player.vimeo.com/video/%s?h=%s", id, hash)
+	}
+	return fmt.Sprintf("https://player.vimeo.com/video/%s", id)
 }
 
 // -----------------------------------------------------------------------------
