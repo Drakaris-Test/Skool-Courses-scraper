@@ -319,8 +319,8 @@ func handleModule(ctx context.Context, m ModuleInfo, courseDir string, cfg Confi
 	modDir := filepath.Join(courseDir, m.Title)
 	modFile := filepath.Join(modDir, "module.html")
 
-	// Skip module if HTML already exists
-	if _, err := os.Stat(modFile); err == nil {
+	// Skip module if HTML already exists and is non-empty
+	if fileExistsAndNonZero(modFile) {
 		fmt.Println("    already downloaded, skipping")
 		return ModuleData{Title: m.Title, URL: m.URL}, nil
 	}
@@ -771,7 +771,7 @@ func buildModuleHTML(path string, title, desc string, videos []VideoRecord) erro
 // -----------------------------------------------------------------------------
 func downloadVideo(url string, outDir string, idx int) (string, error) {
 	final := filepath.Join(outDir, fmt.Sprintf("video-%02d.mp4", idx))
-	if _, err := os.Stat(final); err == nil {
+	if fileExistsAndNonZero(final) {
 		fmt.Printf("      skipping existing file %s\n", filepath.Base(final))
 		return final, nil
 	}
@@ -869,4 +869,12 @@ func uniqueStrings(arr []string) []string {
 		}
 	}
 	return out
+}
+
+func fileExistsAndNonZero(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.Size() > 0
 }

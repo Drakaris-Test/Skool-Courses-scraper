@@ -11,7 +11,7 @@ A Go script that automatically extracts all modules and videos from a Skool clas
 - Generates clean HTML pages for each module (text + video)
 - Supports all Vimeo link formats (`/video/ID`, `/ID/hash`, shared links, etc.)
 - Fully terminal-based, fast, and portable
-- Resumes gracefully: existing modules and videos are skipped
+- Resumes gracefully: previously downloaded modules or videos are skipped if their files are present and non-empty
 
 ---
 
