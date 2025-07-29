@@ -7,6 +7,7 @@ A Go script that automatically extracts all modules and videos from a Skool clas
 ## ✅ Features
 
 - Automatically scrapes all courses and modules from a Skool classroom
+- Can also download a single course when passing its direct URL
 - Downloads embedded videos via [yt-dlp](https://github.com/yt-dlp/yt-dlp) (Vimeo fully supported)
 - Generates clean HTML pages for each module (text + video)
 - Supports all Vimeo link formats (`/video/ID`, `/ID/hash`, shared links, etc.)
@@ -49,6 +50,8 @@ Modifier
   -url "https://www.skool.com/your-classroom/classroom" \
   -email "your.email@example.com" \
   -password "your_password"
+# Le paramètre -url accepte aussi le lien direct d'un cours pour télécharger
+tous ses modules uniquement
 The script will:
 
 Log into your Skool account
