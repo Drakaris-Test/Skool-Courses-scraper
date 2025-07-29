@@ -239,7 +239,8 @@ func scrapeCourses(ctx context.Context, cfg Config) ([]Course, error) {
 		return nil, err
 	}
 
-	var data struct {
+	// Try to parse as a page listing all courses
+	var multi struct {
 		Props struct {
 			PageProps struct {
 				AllCourses []struct {
@@ -251,16 +252,42 @@ func scrapeCourses(ctx context.Context, cfg Config) ([]Course, error) {
 			} `json:"pageProps"`
 		} `json:"props"`
 	}
-	if e := json.Unmarshal([]byte(raw), &data); e != nil {
+	if e := json.Unmarshal([]byte(raw), &multi); e != nil {
 		return nil, e
 	}
-	var out []Course
-	for _, c := range data.Props.PageProps.AllCourses {
-		title := clean(c.Metadata.Title)
-		url := strings.TrimRight(cfg.SkoolURL, "/") + "/" + c.Name
-		out = append(out, Course{Title: title, URL: url})
+
+	// If the page contains "allCourses" we return them
+	if len(multi.Props.PageProps.AllCourses) > 0 {
+		var out []Course
+		for _, c := range multi.Props.PageProps.AllCourses {
+			title := clean(c.Metadata.Title)
+			url := strings.TrimRight(cfg.SkoolURL, "/") + "/" + c.Name
+			out = append(out, Course{Title: title, URL: url})
+		}
+		return out, nil
 	}
-	return out, nil
+
+	// Otherwise we treat the provided URL as a single course
+	var single struct {
+		Props struct {
+			PageProps struct {
+				Course struct {
+					Metadata struct {
+						Title string `json:"title"`
+					} `json:"metadata"`
+				} `json:"course"`
+			} `json:"pageProps"`
+		} `json:"props"`
+	}
+	if e := json.Unmarshal([]byte(raw), &single); e != nil {
+		return nil, e
+	}
+
+	title := clean(single.Props.PageProps.Course.Metadata.Title)
+	if title == "" {
+		title = "Course"
+	}
+	return []Course{{Title: title, URL: cfg.SkoolURL}}, nil
 }
 
 // -----------------------------------------------------------------------------
