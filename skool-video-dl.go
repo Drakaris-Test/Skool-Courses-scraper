@@ -84,7 +84,7 @@ type TiptapNode struct {
 func main() {
 	cfg := parseFlags()
 	initLogging(cfg.Debug)
-	printBanner()
+	//	printBanner()
 	must(os.MkdirAll(cfg.OutputDir, fs.ModePerm))
 	ctx, cancel := setupBrowser(cfg.Headless)
 	defer cancel()
@@ -400,14 +400,33 @@ func handleModule(ctx context.Context, m ModuleInfo, courseDir string, cfg Confi
 			}
 		}
 		// Recherche récursive de tous les videoLink dans la structure complète du module
+		fmt.Printf("    course data: %v\n", course)
 		videoLinks = extractAllVideoLinksFromAny(course)
+		fmt.Printf("    extracted videoLinks: %v\n", videoLinks)
 		break
 	}
 
 	// Ajoute aussi les liens Loom/Vimeo dans le contenu (comme avant)
 	links := extractLoomVimeoLinks(desc)
+	fmt.Printf("    videoLinks: %v\n", videoLinks)
 	for _, l := range videoLinks {
-		allLinks = append(allLinks, rewriteVimeoToPlayer(l))
+		fmt.Printf("    processing video link: %s\n", l)
+		// Check if this is a Vimeo link
+		if strings.Contains(strings.ToLower(l), "vimeo.com") {
+			// For Vimeo URLs with /video/share?h=hash pattern, preserve the original URL
+			if strings.Contains(l, "vimeo.com/video/share?h=") {
+				fmt.Printf("    preserving original Vimeo URL: %s\n", l)
+				allLinks = append(allLinks, l)
+			} else {
+				converted := rewriteVimeoToPlayer(l)
+				fmt.Printf("    converted Vimeo URL: %s -> %s\n", l, converted)
+				allLinks = append(allLinks, converted)
+			}
+		} else {
+			// For non-Vimeo links (YouTube, Loom, etc.), add them as-is
+			fmt.Printf("    adding non-Vimeo URL as-is: %s\n", l)
+			allLinks = append(allLinks, l)
+		}
 	}
 	allLinks = append(allLinks, links...)
 	allLinks = uniqueStrings(allLinks)
@@ -420,19 +439,40 @@ func handleModule(ctx context.Context, m ModuleInfo, courseDir string, cfg Confi
 	var recs []VideoRecord
 	for i, link := range allLinks {
 		tried := false
-		for _, testURL := range allVimeoUrls(link) {
-			fmt.Printf("    downloading => %s\n", testURL)
-			fn, err := downloadVideo(testURL, modDir, i+1)
+		// Check if this is a Vimeo URL
+		isVimeo := strings.Contains(strings.ToLower(link), "vimeo.com")
+
+		if isVimeo {
+			// For Vimeo URLs, try all variants
+			fmt.Printf("    processing Vimeo URL: %s\n", link)
+			vimeoURLs := allVimeoUrls(link)
+			for _, testURL := range vimeoURLs {
+				fmt.Printf("    downloading => %s\n", testURL)
+				fn, err := downloadVideo(testURL, modDir, i+1)
+				if err == nil {
+					recs = append(recs, VideoRecord{URL: testURL, Filename: fn})
+					tried = true
+					break
+				} else {
+					fmt.Printf("      ⚠️  fail dl: %v\n", err)
+				}
+			}
+		} else {
+			// For non-Vimeo URLs (Loom, YouTube, etc.), try the original URL directly
+			fmt.Printf("    downloading => %s\n", link)
+			fn, err := downloadVideo(link, modDir, i+1)
 			if err == nil {
-				recs = append(recs, VideoRecord{URL: testURL, Filename: fn})
+				recs = append(recs, VideoRecord{URL: link, Filename: fn})
 				tried = true
-				break
 			} else {
 				fmt.Printf("      ⚠️  fail dl: %v\n", err)
 			}
 		}
+
 		if !tried {
 			fmt.Printf("      ⚠️  all download attempts failed for: %s\n", link)
+			// Continue processing other videos even if this one fails
+			continue
 		}
 	}
 
@@ -482,9 +522,15 @@ func allVimeoUrls(link string) []string {
 		if len(segs) > 0 {
 			if segs[0] == "video" {
 				if len(segs) > 1 {
-					id = segs[1]
+					// Special case: if path is /video/share, use hash as ID
+					if segs[1] == "share" {
+						hash = u.Query().Get("h")
+						id = hash // Use hash as the actual video ID
+					} else {
+						id = segs[1]
+					}
 				}
-				if len(segs) > 2 {
+				if len(segs) > 2 && segs[1] != "share" {
 					hash = segs[2]
 				}
 			} else {
@@ -494,6 +540,7 @@ func allVimeoUrls(link string) []string {
 				}
 			}
 		}
+		// Override hash from query parameter if present
 		if h := u.Query().Get("h"); h != "" {
 			hash = h
 		}
@@ -507,13 +554,22 @@ func allVimeoUrls(link string) []string {
 			hash = m[2]
 		}
 	}
+
+	// Fallback: if we still don't have a valid ID, try to extract from hash if it looks like an ID
+	if id == "" || id == "share" {
+		// Check if hash looks like a valid ID (alphanumeric)
+		if hash != "" && regexp.MustCompile(`^[a-zA-Z0-9]+$`).MatchString(hash) {
+			id = hash
+		}
+	}
+
 	var urls []string
-	if id != "" {
-		if hash != "" {
+	if id != "" && id != "share" {
+		if hash != "" && hash != id {
 			urls = append(urls, fmt.Sprintf("https://player.vimeo.com/video/%s?h=%s", id, hash))
 		}
 		urls = append(urls, fmt.Sprintf("https://player.vimeo.com/video/%s", id))
-		if hash != "" {
+		if hash != "" && hash != id {
 			urls = append(urls, fmt.Sprintf("https://vimeo.com/%s/%s", id, hash))
 		}
 		urls = append(urls, fmt.Sprintf("https://vimeo.com/%s", id))
@@ -700,9 +756,14 @@ func rewriteVimeoToPlayer(link string) string {
 	if len(segs) > 0 {
 		if segs[0] == "video" {
 			if len(segs) > 1 {
-				id = segs[1]
+				// Special case: if path is /video/share, use hash as ID
+				if segs[1] == "share" {
+					id = hash // Use hash as the actual video ID
+				} else {
+					id = segs[1]
+				}
 			}
-			if len(segs) > 2 {
+			if len(segs) > 2 && segs[1] != "share" {
 				hash = segs[2]
 			}
 		} else {
@@ -720,11 +781,19 @@ func rewriteVimeoToPlayer(link string) string {
 		}
 	}
 
-	if id == "" {
+	// Fallback: if we still don't have a valid ID, try to extract from hash if it looks like an ID
+	if id == "" || id == "share" {
+		// Check if hash looks like a valid ID (alphanumeric)
+		if hash != "" && regexp.MustCompile(`^[a-zA-Z0-9]+$`).MatchString(hash) {
+			id = hash
+		}
+	}
+
+	if id == "" || id == "share" {
 		return link
 	}
 
-	if hash != "" {
+	if hash != "" && hash != id {
 		return fmt.Sprintf("https://player.vimeo.com/video/%s?h=%s", id, hash)
 	}
 	return fmt.Sprintf("https://player.vimeo.com/video/%s", id)
@@ -806,11 +875,26 @@ func downloadVideo(url string, outDir string, idx int) (string, error) {
 	name := fmt.Sprintf("video-%02d.%%(ext)s", idx)
 	outputTemplate := filepath.Join(outDir, name)
 
-	cmd := exec.Command("yt-dlp", "-o", outputTemplate, url)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return "", err
+	// Retry logic for downloading videos
+	maxRetries := 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			fmt.Printf("      retrying download (attempt %d/%d)\n", attempt, maxRetries)
+			// Add a small delay between retries
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+
+		cmd := exec.Command("yt-dlp", "-o", outputTemplate, url)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			if attempt == maxRetries {
+				return "", err
+			}
+			fmt.Printf("      download failed: %v, retrying...\n", err)
+			continue
+		}
+		return final, nil
 	}
 	return final, nil
 }
@@ -854,7 +938,7 @@ func htmlEscape(s string) string {
 func clean(input string) string {
 	s := strings.TrimSpace(input)
 	s = removeAccents(s)
-	bad := []string{"/", "\\", ":", "?", "*", "\"", "<", ">", "|", "(", ")", "’", "'", "“", "”", "‘", "«", "»", "…", "!", "#", "&", "=", "+"}
+	bad := []string{"/", "\\", ":", "?", "*", "\"", "<", ">", "|", "(", ")", "’", "'", "“", "”", "‘", "«", "»", "…", "!", "#", "&", "=", "+", "$"}
 	for _, c := range bad {
 		s = strings.ReplaceAll(s, c, "-")
 	}
